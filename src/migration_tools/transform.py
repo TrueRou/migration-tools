@@ -55,11 +55,6 @@ def build_image_description(
     return "Legacy image imported via migration-tools"
 
 
-def normalize_privileges(_: Iterable[str] | None = None) -> str:
-    """All migrated用户默认给予 NORMAL 权限。"""
-    return '["NORMAL"]'
-
-
 @dataclass(slots=True)
 class MergeSectionResult:
     """Per-section migration counters."""
@@ -77,5 +72,4 @@ __all__ = [
     "build_image_labels",
     "build_image_name",
     "derive_aspect_id",
-    "normalize_privileges",
 ]

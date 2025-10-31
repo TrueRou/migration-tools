@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, List, Sequence
+from typing import List, Sequence
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection, Engine, Row
@@ -15,7 +16,6 @@ from .transform import (
     build_image_labels,
     build_image_name,
     derive_aspect_id,
-    normalize_privileges,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class MergeConfig:
     target_url: str
     batch_size: int = 500
     dry_run: bool = False
-    admin_user_id: int | None = None
+    admin_user_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -98,7 +98,7 @@ def merge_users(
     existing_ids = _collect_existing_ids(target_conn, "tbl_user")
 
     stmt = text(
-        "SELECT id, username, hashed_password, created_at FROM users ORDER BY id"
+        "SELECT id, username, hashed_password, email, created_at FROM users ORDER BY id"
     )
     rows = source_conn.execute(stmt)
 
@@ -120,7 +120,6 @@ def merge_users(
     if payload:
         _upsert_users(target_conn, payload)
 
-    _sync_sequence(target_conn, "tbl_user_id_seq", "tbl_user", "id")
     logger.info(
         "用户迁移完成：共处理 %s 条，新增 %s 条，更新 %s 条，跳过 %s 条",
         summary.processed,
@@ -135,11 +134,10 @@ def _adapt_user_row(row: Row) -> dict:
     created_at = _ensure_datetime(row.created_at)
     now = datetime.utcnow()
     return {
-        "id": row.id,
+        "id": uuid.uuid4(),
         "username": row.username,
         "password": row.hashed_password,
-        "phone": None,
-        "privileges": normalize_privileges(),
+        "email": row.email,
         "created_at": created_at,
         "updated_at": now,
     }
@@ -151,13 +149,13 @@ def _upsert_users(conn: Connection, payload: Sequence[dict]) -> None:
     conn.execute(
         text(
             """
-            INSERT INTO tbl_user (id, username, password, phone, privileges, created_at, updated_at)
-            VALUES (:id, :username, :password, :phone, :privileges, :created_at, :updated_at)
+            INSERT INTO tbl_user (id, username, password, email, permissions, created_at, updated_at)
+            VALUES (:id, :username, :password, :email, :permissions, :created_at, :updated_at)
             ON CONFLICT (id) DO UPDATE SET
                 username = EXCLUDED.username,
                 password = EXCLUDED.password,
-                phone = EXCLUDED.phone,
-                privileges = EXCLUDED.privileges,
+                email = EXCLUDED.email,
+                permissions = EXCLUDED.permissions,
                 updated_at = EXCLUDED.updated_at
             """
         ),
@@ -175,7 +173,7 @@ def merge_images(
     source_conn: Connection,
     target_conn: Connection,
     batch_size: int,
-    admin_user_id: int | None = None,
+    admin_user_id: str | None = None,
 ) -> MergeSectionResult:
     summary = MergeSectionResult()
     ensure_required_aspects(target_conn)
@@ -297,12 +295,12 @@ def ensure_required_aspects(target_conn: Connection) -> None:
     )
 
 
-def _adapt_image_row(row: Row, aspect_id: str, user_id: int, visibility: int) -> dict:
+def _adapt_image_row(row: Row, aspect_id: str, user_id: str, visibility: int) -> dict:
     uploaded_at = _ensure_datetime(row.uploaded_at)
     labels = build_image_labels(row.kind, row.category)
 
     return {
-        "uuid": row.uuid,
+        "id": row.uuid,
         "user_id": user_id,
         "aspect_id": aspect_id,
         "name": build_image_name(row.label, row.uuid, row.kind),
@@ -378,19 +376,6 @@ def _create_engine(url: str, *, name: str) -> Engine:
 def _collect_existing_ids(conn: Connection, table: str, column: str = "id") -> set:
     result = conn.execute(text(f"SELECT {column} FROM {table}"))
     return {row[0] for row in result}
-
-
-def _sync_sequence(conn: Connection, sequence: str, table: str, column: str) -> None:
-    conn.execute(
-        text(
-            "SELECT setval(:sequence, COALESCE((SELECT MAX("
-            + column
-            + ") FROM "
-            + table
-            + "), 0), true)"
-        ),
-        {"sequence": sequence},
-    )
 
 
 def _ensure_datetime(value: datetime | None) -> datetime:
