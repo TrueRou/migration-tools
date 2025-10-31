@@ -146,20 +146,45 @@ def _adapt_user_row(row: Row) -> dict:
 def _upsert_users(conn: Connection, payload: Sequence[dict]) -> None:
     if not payload:
         return
+    if not payload:
+        return
+
+    # Filter out rows where the username is already taken by a different id.
+    existing = {
+        str(row.username): str(row.id)
+        for row in conn.execute(text("SELECT username, id FROM tbl_user"))
+    }
+
+    filtered: List[dict] = []
+    for entry in payload:
+        uname = entry.get("username")
+        if uname is None:
+            filtered.append(entry)
+            continue
+        existing_id = existing.get(str(uname))
+        if existing_id and existing_id != str(entry["id"]):
+            logger.warning(
+                "跳过用户 %s：用户名已被不同用户 %s 占用", uname, existing_id
+            )
+            continue
+        filtered.append(entry)
+
+    if not filtered:
+        return
+
     conn.execute(
         text(
             """
             INSERT INTO tbl_user (id, username, password, email, permissions, created_at, updated_at)
-            VALUES (:id, :username, :password, :email, :permissions, :created_at, :updated_at)
+            VALUES (:id, :username, :password, :email, '{}', :created_at, :updated_at)
             ON CONFLICT (id) DO UPDATE SET
                 username = EXCLUDED.username,
                 password = EXCLUDED.password,
                 email = EXCLUDED.email,
-                permissions = EXCLUDED.permissions,
                 updated_at = EXCLUDED.updated_at
             """
         ),
-        payload,
+        filtered,
     )
 
 
@@ -178,8 +203,20 @@ def merge_images(
     summary = MergeSectionResult()
     ensure_required_aspects(target_conn)
 
-    existing_uuids = _collect_existing_ids(target_conn, "tbl_image", column="uuid")
-    known_user_ids = _collect_existing_ids(target_conn, "tbl_user")
+    # 构造用于将源库的用户 id 映射到目标库的用户 id 的映射。
+    # 源库 users 表保留了 username；目标库 tbl_user 使用 username 唯一匹配并可能有新的 id。
+    source_id_to_username = {
+        str(row.id): row.username
+        for row in source_conn.execute(text("SELECT id, username FROM users"))
+    }
+
+    target_username_to_id = {
+        str(row.username): str(row.id)
+        for row in target_conn.execute(text("SELECT username, id FROM tbl_user"))
+    }
+
+    existing_uuids = _collect_existing_ids(target_conn, "tbl_image", column="id")
+    known_user_ids = set(target_username_to_id.values())
 
     if admin_user_id is not None and admin_user_id not in known_user_ids:
         raise ValueError(f"admin-user-id {admin_user_id} 不存在于目标库的 tbl_user 中")
@@ -207,15 +244,31 @@ def merge_images(
             user_id = admin_user_id
             visibility = 1
         else:
-            user_id = row.uploaded_by
-            visibility = 0
+            # uploaded_by 在源库是源用户 id；目标库的用户 id 可能已改变。
+            # 通过源库的 id->username 映射，再用 username 在目标库查找对应 id。
+            src_uid = str(row.uploaded_by)
+            username = source_id_to_username.get(src_uid)
+            if username is None:
+                summary.skipped += 1
+                logger.warning(
+                    "图片 %s 的上传者 %s 在源库 users 表中不存在，已跳过",
+                    row.uuid,
+                    row.uploaded_by,
+                )
+                continue
 
-        if user_id not in known_user_ids:
-            summary.skipped += 1
-            logger.warning(
-                "图片 %s 的用户 %s 不存在于目标库，已跳过", row.uuid, user_id
-            )
-            continue
+            tgt_user_id = target_username_to_id.get(username)
+            if tgt_user_id is None:
+                summary.skipped += 1
+                logger.warning(
+                    "图片 %s 的上传者用户名 %s 在目标库 tbl_user 中不存在，已跳过",
+                    row.uuid,
+                    username,
+                )
+                continue
+
+            user_id = tgt_user_id
+            visibility = 0
 
         try:
             aspect_id = derive_aspect_id(row.kind)
@@ -252,27 +305,20 @@ def merge_images(
 
 def ensure_required_aspects(target_conn: Connection) -> None:
     required = {
-        "card-background": {
-            "id": "card-background",
-            "name": "Card Background",
-            "description": "竖版卡片，符合ID-1卡片比例的图片",
+        "id-1-ff": {
+            "id": "id-1-ff",
+            "name": "ISO 7810 ID-1 FF",
+            "description": "ISO 7810 ID-1 全画幅平铺",
             "ratio_width_unit": 768,
             "ratio_height_unit": 1220,
-        },
-        "sega-passname": {
-            "id": "sega-passname",
-            "name": "SEGA Passname",
-            "description": "横版通行证，符合PASSNAME比例的图片",
-            "ratio_width_unit": 338,
-            "ratio_height_unit": 112,
-        },
+        }
     }
 
     existing = {
         row.id
         for row in target_conn.execute(
-            text("SELECT id FROM tbl_image_aspect WHERE id IN (:bg, :pass)"),
-            {"bg": "card-background", "pass": "sega-passname"},
+            text("SELECT id FROM tbl_image_aspect WHERE id IN (:bg)"),
+            {"bg": "id-1-ff"},
         )
     }
 
@@ -321,7 +367,7 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
         text(
             """
             INSERT INTO tbl_image (
-                uuid,
+                id,
                 user_id,
                 aspect_id,
                 name,
@@ -334,7 +380,7 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 updated_at
             )
             VALUES (
-                :uuid,
+                :id,
                 :user_id,
                 :aspect_id,
                 :name,
@@ -346,7 +392,8 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 :created_at,
                 :updated_at
             )
-            ON CONFLICT (uuid) DO UPDATE SET
+            ON CONFLICT (id) DO UPDATE SET
+                id = EXCLUDED.id,
                 user_id = EXCLUDED.user_id,
                 aspect_id = EXCLUDED.aspect_id,
                 name = EXCLUDED.name,
@@ -375,7 +422,7 @@ def _create_engine(url: str, *, name: str) -> Engine:
 
 def _collect_existing_ids(conn: Connection, table: str, column: str = "id") -> set:
     result = conn.execute(text(f"SELECT {column} FROM {table}"))
-    return {row[0] for row in result}
+    return {str(row[0]) for row in result}
 
 
 def _ensure_datetime(value: datetime | None) -> datetime:

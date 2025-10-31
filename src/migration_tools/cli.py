@@ -40,7 +40,7 @@ def merge(
     ),
     batch_size: int = typer.Option(500, min=1, help="每批批处理的数据量"),
     dry_run: bool = typer.Option(False, help="仅演练，不提交任何更改"),
-    admin_user_id: Optional[int] = typer.Option(
+    admin_user_id: Optional[str] = typer.Option(
         None, help="当图片缺失上传用户时，补充的管理员用户ID"
     ),
     log_level: Optional[str] = typer.Option("INFO", help="日志级别"),

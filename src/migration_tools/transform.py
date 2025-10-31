@@ -4,12 +4,11 @@ from dataclasses import dataclass
 from typing import Iterable, List, Optional
 
 _KIND_TO_ASPECT = {
-    "BACKGROUND": "card-background",
-    "FRAME": "card-background",
-    "CHARACTER": "card-background",
-    "MASK": "card-background",
-    "LABEL": "card-background",
-    "PASSNAME": "sega-passname",
+    "BACKGROUND": "id-1-ff",
+    "FRAME": "id-1-ff",
+    "CHARACTER": "id-1-ff",
+    "MASK": "id-1-ff",
+    "LABEL": "id-1-ff",
 }
 
 

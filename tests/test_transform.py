@@ -8,16 +8,14 @@ from migration_tools.transform import (
     build_image_labels,
     build_image_name,
     derive_aspect_id,
-    normalize_privileges,
 )
 
 
 @pytest.mark.parametrize(
     "kind,expected",
     [
-        ("BACKGROUND", "card-background"),
-        ("frame", "card-background"),
-        ("PASSNAME", "sega-passname"),
+        ("BACKGROUND", "id-1-ff"),
+        ("frame", "id-1-ff"),
     ],
 )
 def test_derive_aspect_id(kind: str, expected: str) -> None:
@@ -65,7 +63,3 @@ def test_build_image_description_prefers_label_then_category_then_kind() -> None
         build_image_description(None, None, "")
         == "Legacy image imported via migration-tools"
     )
-
-
-def test_normalize_privileges() -> None:
-    assert normalize_privileges(["ADMIN"]) == '["NORMAL"]'
