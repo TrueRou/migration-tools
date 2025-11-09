@@ -13,10 +13,10 @@ uv sync
 
 ## 使用方法
 
-执行 `merge` 命令，将源 MariaDB 与目标 PostgreSQL 之间的 `users`、`images` 数据完成迁移：
+执行 `merge-uc` 命令，将旧 UC 数据库中的 `users`、`images` 表迁移到 Leporid PostgreSQL：
 
 ```powershell
-uv run migration-tools merge --source "mysql+pymysql://user:pass@localhost:3307/usagi_card" --target "postgresql+psycopg://user:pass@localhost:5432/leporid" --admin-user-id 1
+uv run migration-tools merge-uc --source "mysql+pymysql://user:pass@localhost:3307/usagi_card" --target "postgresql+psycopg://user:pass@localhost:5432/leporid" --admin-user-id 1
 ```
 
 命令会：
@@ -24,6 +24,21 @@ uv run migration-tools merge --source "mysql+pymysql://user:pass@localhost:3307/
 - 合并用户，并统一将目标库的权限设置为 `["NORMAL"]`。
 - 对缺失上传者的图片，可通过 `--admin-user-id` 指定管理员账号接管，并保持其 `visibility=1`；原始带上传用户的图片会写入 `visibility=0`。
 - 确保所需的 `id-1-ff` 图片比例配置存在，不存在则自动创建。
+
+执行 `merge-up` 命令，可将 usagipass MariaDB 迁移到新的 Leporid / Usagipass PostgreSQL 架构：
+
+```powershell
+uv run migration-tools merge-up `
+	--source "mysql+pymysql://user:pass@localhost:3307/usagipass" `
+	--leporid "postgresql+psycopg://user:pass@localhost:5432/leporid" `
+	--usagipass "postgresql+psycopg://user:pass@localhost:5432/usagipass"
+```
+
+该命令会：
+
+- 为每位用户根据 `prefer_server` 生成新的 Leporid 账号，并补充第三方账号绑定、评分、偏好设置。
+- 写入 Usagipass 的账号信息、评级与偏好，缺失字段会自动套用默认值。
+- 只迁移由用户上传的图片（带 `uploaded_by` 的记录），公共图片不会重复上传。
 
 ## 开发辅助
 

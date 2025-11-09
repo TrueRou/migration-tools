@@ -347,6 +347,7 @@ def _adapt_image_row(row: Row, aspect_id: str, user_id: str, visibility: int) ->
 
     return {
         "id": row.uuid,
+        "uuid": row.uuid,
         "user_id": user_id,
         "aspect_id": aspect_id,
         "name": build_image_name(row.label, row.uuid, row.kind),

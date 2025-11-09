@@ -9,6 +9,7 @@ from rich.table import Table
 
 from .logging import configure_logging
 from .merge import MergeConfig, run_merge
+from .merge_up import MergeUpConfig, MergeUpResult, run_merge_up
 from .transform import MergeSectionResult
 
 console = Console()
@@ -26,8 +27,8 @@ def _render_section(title: str, stats: MergeSectionResult) -> None:
     console.print(table)
 
 
-@app.command()
-def merge(
+@app.command("merge-uc")
+def merge_uc(
     source: str = typer.Option(
         ...,
         "--source",
@@ -49,7 +50,7 @@ def merge(
 
     configure_logging(log_level)
     logging.getLogger(__name__).debug(
-        "执行 merge，source=%s target=%s batch_size=%s dry_run=%s admin_user_id=%s",
+        "执行 merge-uc，source=%s target=%s batch_size=%s dry_run=%s admin_user_id=%s",
         source,
         target,
         batch_size,
@@ -75,6 +76,68 @@ def merge(
     console.rule("迁移结果")
     _render_section("Users", result.users)
     _render_section("Images", result.images)
+    console.print("[green]迁移执行完毕[/green]")
+
+
+def _render_merge_up(result: MergeUpResult) -> None:
+    console.rule("迁移结果")
+    _render_section("Users", result.users)
+    _render_section("Third Parties", result.third_parties)
+    _render_section("Accounts", result.accounts)
+    _render_section("Ratings", result.ratings)
+    _render_section("Preferences", result.preferences)
+    _render_section("Images", result.images)
+
+
+@app.command("merge-up")
+def merge_up(
+    source: str = typer.Option(
+        ...,
+        "--source",
+        help="MariaDB 连接串，例如 mysql+pymysql://user:pass@host:port/usagipass",
+    ),
+    leporid: str = typer.Option(
+        ...,
+        "--leporid",
+        help="Leporid PostgreSQL 连接串，例如 postgresql+psycopg://user:pass@host:port/leporid",
+    ),
+    usagipass: str = typer.Option(
+        ...,
+        "--usagipass",
+        help="Usagipass PostgreSQL 连接串，例如 postgresql+psycopg://user:pass@host:port/usagipass",
+    ),
+    batch_size: int = typer.Option(500, min=1, help="每批批处理的数据量"),
+    dry_run: bool = typer.Option(False, help="仅演练，不提交任何更改"),
+    log_level: Optional[str] = typer.Option("INFO", help="日志级别"),
+) -> None:
+    """迁移 usagipass MariaDB 数据到 leporid/usagipass PostgreSQL 架构。"""
+
+    configure_logging(log_level)
+    logging.getLogger(__name__).debug(
+        "执行 merge-up，source=%s leporid=%s usagipass=%s batch_size=%s dry_run=%s",
+        source,
+        leporid,
+        usagipass,
+        batch_size,
+        dry_run,
+    )
+
+    config = MergeUpConfig(
+        source_url=source,
+        leporid_url=leporid,
+        usagipass_url=usagipass,
+        batch_size=batch_size,
+        dry_run=dry_run,
+    )
+
+    try:
+        result = run_merge_up(config)
+    except Exception as exc:
+        logging.getLogger("migration_tools").exception("迁移失败")
+        typer.secho(f"迁移失败: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    _render_merge_up(result)
     console.print("[green]迁移执行完毕[/green]")
 
 
