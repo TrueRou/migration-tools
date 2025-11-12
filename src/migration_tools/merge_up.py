@@ -202,6 +202,7 @@ def _execute_merge_up(
 
     preference_result = _migrate_preferences(
         usagipass_conn=usagipass_conn,
+        leporid_conn=leporid_conn,
         migrated_users=migrated_users,
         preferences_by_user=preferences_by_user,
         batch_size=batch_size,
@@ -651,6 +652,7 @@ def _upsert_ratings(conn: Connection, payload: Sequence[dict]) -> None:
 def _migrate_preferences(
     *,
     usagipass_conn: Connection,
+    leporid_conn: Connection,
     migrated_users: Sequence[MigratedUser],
     preferences_by_user: Mapping[str, SourcePreference],
     batch_size: int,
@@ -660,12 +662,13 @@ def _migrate_preferences(
         str(row.user_id)
         for row in usagipass_conn.execute(text("SELECT user_id FROM tbl_preference"))
     }
+    image_uuid_lookup = _build_image_uuid_lookup(usagipass_conn, leporid_conn)
 
     payload: List[dict] = []
     for user in migrated_users:
         summary.processed += 1
         pref = preferences_by_user.get(user.source.username)
-        payload.append(_build_preference_row(user, pref))
+        payload.append(_build_preference_row(user, pref, image_uuid_lookup))
         if user.new_user_id in existing_users:
             summary.updated += 1
         else:
@@ -682,7 +685,11 @@ def _migrate_preferences(
     return summary
 
 
-def _build_preference_row(user: MigratedUser, pref: SourcePreference | None) -> dict:
+def _build_preference_row(
+    user: MigratedUser,
+    pref: SourcePreference | None,
+    image_uuid_lookup: Mapping[str, str],
+) -> dict:
     pref = pref or SourcePreference(
         username=user.source.username,
         maimai_version="",
@@ -701,6 +708,11 @@ def _build_preference_row(user: MigratedUser, pref: SourcePreference | None) -> 
         show_date=True,
     )
 
+    character_id = _resolve_image_reference(pref.character_id, image_uuid_lookup)
+    background_id = _resolve_image_reference(pref.background_id, image_uuid_lookup)
+    frame_id = _resolve_image_reference(pref.frame_id, image_uuid_lookup)
+    passname_id = _resolve_image_reference(pref.passname_id, image_uuid_lookup)
+
     return {
         "user_id": user.new_user_id,
         "maimai_version": pref.maimai_version,
@@ -717,12 +729,51 @@ def _build_preference_row(user: MigratedUser, pref: SourcePreference | None) -> 
         "show_display_name": True,
         "show_friend_code": True,
         "show_date": pref.show_date,
-        "character_id": pref.character_id,
+        "character_id": character_id,
         "mask_id": "",
-        "background_id": pref.background_id,
-        "frame_id": pref.frame_id,
-        "passname_id": pref.passname_id,
+        "background_id": background_id,
+        "frame_id": frame_id,
+        "passname_id": passname_id,
     }
+
+
+def _build_image_uuid_lookup(
+    usagipass_conn: Connection, leporid_conn: Connection
+) -> Dict[str, str]:
+    sega_name_by_id = {
+        str(row.id): row.sega_name
+        for row in usagipass_conn.execute(text("SELECT id, sega_name FROM images"))
+        if row.sega_name
+    }
+    if not sega_name_by_id:
+        return {}
+
+    image_id_by_file_name = {
+        row.file_name: str(row.id)
+        for row in leporid_conn.execute(
+            text(
+                """
+                SELECT id, file_name
+                FROM tbl_image
+                WHERE file_name IS NOT NULL AND file_name <> ''
+                """
+            )
+        )
+        if row.file_name
+    }
+
+    mapping: Dict[str, str] = {}
+    for source_id, sega_name in sega_name_by_id.items():
+        target_id = image_id_by_file_name.get(sega_name)
+        if target_id:
+            mapping[source_id] = target_id
+    return mapping
+
+
+def _resolve_image_reference(value: str, lookup: Mapping[str, str]) -> str:
+    if not value:
+        return value
+    return lookup.get(value, value)
 
 
 def _upsert_preferences(conn: Connection, payload: Sequence[dict]) -> None:
