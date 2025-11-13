@@ -99,8 +99,8 @@ class MigratedUser:
 
 
 SERVER_RULES: Dict[str, dict] = {
-    "DIVING_FISH": {"prefix": "dvfh_", "strategy": 1, "identifier": "DIVING_FISH"},
-    "LXNS": {"prefix": "lxns_", "strategy": 2, "identifier": "LXNS"},
+    "DIVING_FISH": {"prefix": "dvfh_", "strategy": 1, "identifier": "divingfish"},
+    "LXNS": {"prefix": "lxns_", "strategy": 2, "identifier": "lxns"},
 }
 
 
@@ -201,6 +201,7 @@ def _execute_merge_up(
     )
 
     preference_result = _migrate_preferences(
+        source_conn=source_conn,
         usagipass_conn=usagipass_conn,
         leporid_conn=leporid_conn,
         migrated_users=migrated_users,
@@ -335,9 +336,11 @@ def _load_server_ids(conn: Connection) -> Dict[str, int]:
     rows = conn.execute(text("SELECT id, identifier FROM tbl_server"))
     mapping: Dict[str, int] = {}
     for row in rows:
-        identifier = (row.identifier or "").upper()
+        identifier = (row.identifier or "").strip().lower()
+        if not identifier:
+            continue
         mapping[identifier] = int(row.id)
-    required = {"DIVING_FISH", "LXNS"}
+    required = {"divingfish", "lxns"}
     missing = required - mapping.keys()
     if missing:
         raise RuntimeError(
@@ -358,24 +361,44 @@ def _migrate_users(
 
     for user in users:
         summary.processed += 1
-        server_rule = SERVER_RULES.get(user.prefer_server)
-        if server_rule is None:
+
+        accounts = list(accounts_by_user.get(user.username, ()))
+        if not accounts:
             summary.skipped += 1
             logger.warning(
-                "跳过用户 %s：无法识别的 prefer_server=%s",
+                "跳过用户 %s：未找到任何账号",
                 user.username,
-                user.prefer_server,
             )
             continue
 
-        accounts = list(accounts_by_user.get(user.username, ()))
         primary = _select_primary_account(user.prefer_server, accounts)
-        if primary is None:
+        if primary is None or primary.account_server not in SERVER_RULES:
+            primary = next(
+                (acct for acct in accounts if acct.account_server in SERVER_RULES),
+                None,
+            )
+            if primary is None:
+                summary.skipped += 1
+                logger.warning(
+                    "跳过用户 %s：所有账号的服务器均不受支持",
+                    user.username,
+                )
+                continue
+            logger.info(
+                "用户 %s 的首选服务器 %s 不可用，改用账号 %s 的服务器 %s",
+                user.username,
+                user.prefer_server or "",
+                primary.account_name,
+                primary.account_server,
+            )
+
+        server_rule = SERVER_RULES.get(primary.account_server)
+        if server_rule is None:
             summary.skipped += 1
             logger.warning(
-                "跳过用户 %s：未找到首选服务器 %s 对应的账号",
+                "跳过用户 %s：无法识别的服务器 %s",
                 user.username,
-                user.prefer_server,
+                primary.account_server,
             )
             continue
 
@@ -405,7 +428,7 @@ def _migrate_users(
                 source=user,
                 new_user_id=new_user_id,
                 new_username=new_username,
-                prefer_server=user.prefer_server,
+                prefer_server=primary.account_server,
                 primary_account=primary,
                 accounts=accounts,
             )
@@ -651,6 +674,7 @@ def _upsert_ratings(conn: Connection, payload: Sequence[dict]) -> None:
 
 def _migrate_preferences(
     *,
+    source_conn: Connection,
     usagipass_conn: Connection,
     leporid_conn: Connection,
     migrated_users: Sequence[MigratedUser],
@@ -662,7 +686,7 @@ def _migrate_preferences(
         str(row.user_id)
         for row in usagipass_conn.execute(text("SELECT user_id FROM tbl_preference"))
     }
-    image_uuid_lookup = _build_image_uuid_lookup(usagipass_conn, leporid_conn)
+    image_uuid_lookup = _build_image_uuid_lookup(source_conn, leporid_conn)
 
     payload: List[dict] = []
     for user in migrated_users:
@@ -738,11 +762,11 @@ def _build_preference_row(
 
 
 def _build_image_uuid_lookup(
-    usagipass_conn: Connection, leporid_conn: Connection
+    source_conn: Connection, leporid_conn: Connection
 ) -> Dict[str, str]:
     sega_name_by_id = {
         str(row.id): row.sega_name
-        for row in usagipass_conn.execute(text("SELECT id, sega_name FROM images"))
+        for row in source_conn.execute(text("SELECT id, sega_name FROM images"))
         if row.sega_name
     }
     if not sega_name_by_id:
