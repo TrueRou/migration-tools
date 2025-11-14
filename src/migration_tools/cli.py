@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from .copy_img import CopyImageConfig, run_copy_img
 from .logging import configure_logging
 from .merge import MergeConfig, run_merge
 from .merge_up import MergeUpConfig, MergeUpResult, run_merge_up
@@ -87,6 +89,80 @@ def _render_merge_up(result: MergeUpResult) -> None:
     _render_section("Ratings", result.ratings)
     _render_section("Preferences", result.preferences)
     _render_section("Images", result.images)
+
+
+@app.command("copy-img")
+def copy_img(
+    source_dir: Path = typer.Option(
+        ...,
+        "--source-dir",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+        help="图片源目录，需包含 {id}.webp 文件",
+    ),
+    target_dir: Path = typer.Option(
+        ...,
+        "--target-dir",
+        file_okay=False,
+        dir_okay=True,
+        writable=True,
+        resolve_path=True,
+        help="复制图片的目标目录",
+    ),
+    leporid: str = typer.Option(
+        ...,
+        "--leporid",
+        help="Leporid PostgreSQL 连接串，例如 postgresql+psycopg://user:pass@host:port/leporid",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite/--no-overwrite",
+        help="目标已存在时是否覆盖",
+    ),
+    log_level: Optional[str] = typer.Option("INFO", help="日志级别"),
+) -> None:
+    """从 leporid 查询图片列表并复制本地文件。"""
+
+    configure_logging(log_level)
+
+    source_dir = source_dir.resolve()
+    target_dir = target_dir.resolve()
+
+    logging.getLogger(__name__).debug(
+        "执行 copy-img，source_dir=%s target_dir=%s leporid=%s overwrite=%s",
+        source_dir,
+        target_dir,
+        leporid,
+        overwrite,
+    )
+
+    config = CopyImageConfig(
+        source_dir=source_dir,
+        target_dir=target_dir,
+        leporid_url=leporid,
+        overwrite=overwrite,
+    )
+
+    try:
+        stats = run_copy_img(config)
+    except Exception as exc:
+        logging.getLogger("migration_tools").exception("复制失败")
+        typer.secho(f"复制失败: {exc}", err=True, fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    console.rule("复制结果")
+    table = Table(expand=True)
+    table.add_column("指标", justify="left")
+    table.add_column("数量", justify="right")
+    table.add_row("处理总数", str(stats.processed))
+    table.add_row("已复制", str(stats.copied))
+    table.add_row("源文件缺失", str(stats.skipped_missing))
+    table.add_row("目标已存在", str(stats.skipped_existing))
+    console.print(table)
+    console.print("[green]图片复制完成[/green]")
 
 
 @app.command("merge-up")

@@ -53,7 +53,7 @@ def test_build_preference_row_defaults_when_missing() -> None:
         accounts=[account],
     )
 
-    row = merge_up._build_preference_row(migrated, None)
+    row = merge_up._build_preference_row(migrated, None, {})
 
     assert row["player_info_color"] == "#ffffff"
     assert row["chara_info_color"] == "#fee37c"
@@ -92,7 +92,7 @@ def test_build_preference_row_respects_existing_values() -> None:
         show_date=False,
     )
 
-    row = merge_up._build_preference_row(migrated, pref)
+    row = merge_up._build_preference_row(migrated, pref, {})
 
     assert row["maimai_version"] == "FESTiVAL"
     assert row["qr_size"] == 20
