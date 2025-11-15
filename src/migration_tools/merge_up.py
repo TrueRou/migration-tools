@@ -24,6 +24,36 @@ from .transform import (
 
 logger = logging.getLogger(__name__)
 
+# wtf i have no idea to map these properly so hardcode for now
+uuid_mapping = {
+    "1051f05f-d605-4b73-93b8-66c6e32c4979": "bce7437d-0243-4b03-8ee4-90cf069fb403",
+    "1a0bbc52-a927-45ef-b81d-a14c0442b563": "dce699fc-6878-43d6-b7fc-ce2d2d5afb40",
+    "1c30bd9d-a0be-434f-96a3-31a34291ebc6": "deff9fde-4542-4dad-aa60-15b8848b2513",
+    "1ed53623-0107-4b20-bd6b-699b27ad5b09": "84adfa36-69b7-491e-8faf-ecfeca08ba2c",
+    "268a5b81-1e53-42aa-aaf0-4d17936d7116": "039f9d39-4bc1-4569-b4c1-ae5b7c6483c1",
+    "2e0265e4-89b5-4977-86d4-96f961960561": "fcab9c9c-0be7-4d14-9172-72f10ee4282e",
+    "3f9e16ad-cd47-4910-a4e5-d8c222976791": "cad4cc4f-0073-42e8-8596-bd22a7f5193d",
+    "4091f5b5-f08e-45f3-ab0b-53249f3609e2": "f56964ac-6940-40b0-bb31-bd60afa064d2",
+    "596a0a0e-721a-4fc4-a49b-b54f612d75e5": "1d4628b8-c1e8-4c8c-9d75-c6cb08cead0c",
+    "77e8169b-e48f-43f0-b4ed-e9fd3c87805b": "23164b47-1cd4-4c39-b895-488eba89b8ab",
+    "7d25b953-39b3-41a3-aec3-3cfa5e2d7adb": "b916c283-7003-4bec-b1d1-950ecb5b79ff",
+    "888794e2-8d8a-4838-9d0f-d3e8d06d9b30": "3b57ce3f-e2d4-4165-844c-0d0d39fbbab2",
+    "8eb3efbf-b199-48b3-aa08-fd427ac91cc9": "7e30dae1-d1f8-47bd-a6ff-56ac5983e6e2",
+    "944d9a96-2774-4f4a-a9f9-422fb5f5f1a6": "ce79feda-4f5e-47fc-95bc-23f1e293570b",
+    "adb6b3e9-b7f5-4724-946a-ef35be51603e": "6a742fd3-f9e2-4edf-ab65-9208fae30d36",
+    "b0456170-441f-4dc1-81ce-fe549d442e90": "f7d4c8a8-9028-4375-9908-1ee59aadc18b",
+    "b1c34d34-d086-4a08-9c96-df9b6dfe701f": "380e61f5-78a7-49c4-ba2e-013277f2741a",
+    "b4152ca1-4722-414a-8b43-7483154bf217": "a23b0140-42e6-43df-b303-34596cb389be",
+    "dd5043d8-02ef-4f94-877e-de236c048a02": "d9fd855e-d44b-48d0-aa0e-bf9c966e7ed9",
+    "f0a98df7-7b0a-4e60-bfe9-5ce419713d34": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "7a54e27d-0908-45be-a4f2-5a32021e26f9": "f363a632-4b9f-41de-824b-43bd010b9975",
+    "48de8539-d700-4323-8e18-218c1751fd7b": "2aa7c158-875e-4cb1-96b1-65446917e4dc",
+    "da6224bd-b7a3-4d29-8ba4-337347cba745": "036f4e1b-75f9-428c-9bab-180547bfaa3c",
+    "d94e8c0d-15ac-47f6-92d1-d0fe6ffb99f8": "421943e9-2221-45f1-8f76-5a1ca012028e",
+    "6c990fb7-beca-4ce5-93a7-f19f5e591a4d": "b86508d5-1aba-45b0-b66a-c91f2efcd319",
+    "de4ba22d-37b4-43e9-8eaa-845f3e1b02b1": "fa52e0c6-656a-4812-818b-fb19455b1043",
+}
+
 
 @dataclass(slots=True)
 class MergeUpConfig:
@@ -795,9 +825,11 @@ def _build_image_uuid_lookup(
 
 
 def _resolve_image_reference(value: str, lookup: Mapping[str, str]) -> str:
-    if not value:
-        return value
-    return lookup.get(value, value)
+    if value in lookup:
+        return lookup[value]
+    if value in uuid_mapping:
+        return uuid_mapping[value]
+    return value
 
 
 def _upsert_preferences(conn: Connection, payload: Sequence[dict]) -> None:
