@@ -24,7 +24,7 @@ def derive_aspect_id(kind: str) -> str:
     return _KIND_TO_ASPECT[key]
 
 
-def build_image_labels(kind: str, category: Optional[str]) -> List[str]:
+def build_image_labels(kind: str, category: Optional[str], workshop: bool) -> List[str]:
     """Compose the labels array to be written into `tbl_image.labels`."""
     labels: List[str] = []
     if kind:
@@ -33,25 +33,19 @@ def build_image_labels(kind: str, category: Optional[str]) -> List[str]:
         normalized = category.strip()
         if normalized:
             labels.append(normalized.lower())
-    return labels or ["unclassified"]
+    if workshop:
+        labels.append("workshop")
+    return labels
 
 
-def build_image_name(label: Optional[str], uuid: str, kind: str) -> str:
+def build_image_name(label: Optional[str], trace_id: Optional[str]) -> str:
     """Generate the `name` field for a migrated image."""
+    name = ""
     if label and label.strip():
-        return label.strip()
-    fallback_kind = kind.title() if kind else "Image"
-    return f"{fallback_kind}-{uuid}"
-
-
-def build_image_description(
-    label: Optional[str], category: Optional[str], kind: str
-) -> str:
-    """Generate the `description` field for a migrated image."""
-    for candidate in (label, category, kind.title() if kind else None):
-        if candidate and candidate.strip():
-            return candidate.strip()
-    return "Legacy image imported via migration-tools"
+        name = label.strip()
+    elif trace_id and trace_id.strip():
+        name = trace_id.strip()
+    return name
 
 
 @dataclass(slots=True)
@@ -67,7 +61,6 @@ class MergeSectionResult:
 __all__ = [
     "MergeSectionResult",
     "UnknownAspectError",
-    "build_image_description",
     "build_image_labels",
     "build_image_name",
     "derive_aspect_id",

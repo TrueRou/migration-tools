@@ -16,7 +16,6 @@ from .merge import ensure_required_aspects
 from .transform import (
     MergeSectionResult,
     UnknownAspectError,
-    build_image_description,
     build_image_labels,
     build_image_name,
     derive_aspect_id,
@@ -52,6 +51,23 @@ uuid_mapping = {
     "d94e8c0d-15ac-47f6-92d1-d0fe6ffb99f8": "421943e9-2221-45f1-8f76-5a1ca012028e",
     "6c990fb7-beca-4ce5-93a7-f19f5e591a4d": "b86508d5-1aba-45b0-b66a-c91f2efcd319",
     "de4ba22d-37b4-43e9-8eaa-845f3e1b02b1": "fa52e0c6-656a-4812-818b-fb19455b1043",
+    "76675abf-c8de-4486-b673-587e3b3e7f8f": "421943e9-2221-45f1-8f76-5a1ca012028e",
+    "10843d4c-5522-4fb5-943c-9e4da8966d5a": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "25776251-7a69-4265-a076-a3f8a526aee6": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "2c4bc603-322a-4e7b-a5be-083ef3143583": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "2d3fa0aa-5bc0-48a1-bcb6-ae05c94dfdb5": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "2e104068-2394-4337-b87b-9c03b39ec552": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "2f49c787-0e8a-40ca-adf2-0c665a93e942": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "40a158db-0e11-466b-919d-ac4e4307ecea": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "418737b1-8e60-4221-87cd-eb984ee47f10": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "4f54a8d1-4c60-414a-8846-d60ecf37b50b": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "50fa5f8e-5fcb-4407-aeb9-953c24fe192d": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "6764ee42-09e3-4123-9e06-476b50fc1d8e": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "a9aa77c8-8a75-4446-a4f9-7b42e5e84014": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "c809fa61-8a3a-40c5-a25c-4fa7353b28d5": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "e3976992-97b7-4e3a-8a8f-b21e531a5b77": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "f0ce2fde-99a7-4619-8059-3ed902d6d301": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
+    "f973d4f4-e1d4-468c-a38b-ea5bcd6232f3": "d46688e2-ace7-40ce-b76a-f89e11a016ff",
 }
 
 
@@ -598,13 +614,10 @@ def _migrate_accounts(
                 existing[key] = entry_id
                 summary.inserted += 1
 
-            credentials = json.dumps(
-                {
-                    "accountName": account.account_name,
-                    "accountPassword": account.account_password,
-                },
-                ensure_ascii=False,
-            )
+            if account.account_server == "DIVING_FISH":
+                continue
+
+            credentials = account.account_password
 
             payload.append(
                 {
@@ -935,7 +948,9 @@ def _migrate_images(
             logger.warning("图片 %s 跳过：%s", row.id, exc)
             continue
 
-        entry = _adapt_image_row_for_up(row, aspect_id, user.new_user_id)
+        entry = _adapt_image_row_for_up(
+            row, aspect_id, user.new_user_id, row.uploaded_by is not None
+        )
         payload.append(entry)
         if str(row.id) in existing_ids:
             summary.updated += 1
@@ -953,15 +968,15 @@ def _migrate_images(
     return summary
 
 
-def _adapt_image_row_for_up(row, aspect_id: str, user_id: str) -> dict:
+def _adapt_image_row_for_up(row, aspect_id: str, user_id: str, workshop: bool) -> dict:
     uploaded_at = _ensure_datetime(row.uploaded_at)
-    labels = build_image_labels(row.kind, row.sega_name)
+    labels = build_image_labels(row.kind, row.sega_name, workshop)
     return {
         "id": row.id,
         "user_id": user_id,
         "aspect_id": aspect_id,
-        "name": build_image_name(row.name, row.id, row.kind),
-        "description": build_image_description(row.name, row.sega_name, row.kind),
+        "name": build_image_name(row.name, ""),
+        "description": "",
         "visibility": 0,
         "labels": labels,
         "file_name": None,

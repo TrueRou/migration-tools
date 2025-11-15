@@ -12,7 +12,6 @@ from sqlalchemy.engine import Connection, Engine, Row
 from .transform import (
     MergeSectionResult,
     UnknownAspectError,
-    build_image_description,
     build_image_labels,
     build_image_name,
     derive_aspect_id,
@@ -277,7 +276,9 @@ def merge_images(
             logger.warning("图片 %s 跳过：%s", row.uuid, exc)
             continue
 
-        entry = _adapt_image_row(row, aspect_id, user_id, visibility)
+        entry = _adapt_image_row(
+            row, aspect_id, user_id, visibility, row.uploaded_by is not None
+        )
 
         if row.uuid in existing_uuids:
             summary.updated += 1
@@ -341,17 +342,19 @@ def ensure_required_aspects(target_conn: Connection) -> None:
     )
 
 
-def _adapt_image_row(row: Row, aspect_id: str, user_id: str, visibility: int) -> dict:
+def _adapt_image_row(
+    row: Row, aspect_id: str, user_id: str, visibility: int, workshop: bool
+) -> dict:
     uploaded_at = _ensure_datetime(row.uploaded_at)
-    labels = build_image_labels(row.kind, row.category)
+    labels = build_image_labels(row.kind, row.category, workshop)
 
     return {
         "id": row.uuid,
         "uuid": row.uuid,
         "user_id": user_id,
         "aspect_id": aspect_id,
-        "name": build_image_name(row.label, row.uuid, row.kind),
-        "description": build_image_description(row.label, row.category, row.kind),
+        "name": build_image_name(row.label, row.trace_id),
+        "description": "",
         "visibility": visibility,
         "labels": labels,
         "file_name": row.file_name,
