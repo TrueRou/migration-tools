@@ -795,6 +795,7 @@ def _build_preference_row(
         "show_dx_rating": True,
         "show_display_name": True,
         "show_friend_code": True,
+        "enable_mask": False,
         "show_date": pref.show_date,
         "character_id": character_id,
         "mask_id": "",
