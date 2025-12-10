@@ -23,6 +23,6 @@ def test_adapt_image_row_assigns_user_and_visibility() -> None:
     assert entry["user_id"] == 42
     assert entry["visibility"] == 1
     assert entry["aspect_id"] == "id-1-ff"
-    assert entry["metadata_id"] == "trace-123"
+    assert entry["original_id"] == "trace-123"
     assert entry["file_name"] == "legacy.png"
     assert entry["labels"] == ["background"]

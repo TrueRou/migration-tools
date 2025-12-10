@@ -174,11 +174,11 @@ def _upsert_users(conn: Connection, payload: Sequence[dict]) -> None:
     conn.execute(
         text(
             """
-            INSERT INTO tbl_user (id, username, password, email, permissions, created_at, updated_at)
-            VALUES (:id, :username, :password, :email, '{}', :created_at, :updated_at)
+            INSERT INTO tbl_user (id, username, hashed_password, email, permissions, created_at, updated_at)
+            VALUES (:id, :username, :hashed_password, :email, '{}', :created_at, :updated_at)
             ON CONFLICT (id) DO UPDATE SET
                 username = EXCLUDED.username,
-                password = EXCLUDED.password,
+                hashed_password = EXCLUDED.hashed_password,
                 email = EXCLUDED.email,
                 updated_at = EXCLUDED.updated_at
             """
@@ -357,8 +357,8 @@ def _adapt_image_row(
         "description": "",
         "visibility": visibility,
         "labels": labels,
-        "file_name": row.file_name,
-        "metadata_id": row.trace_id,
+        "original_name": row.file_name,
+        "original_id": row.trace_id,
         "created_at": uploaded_at,
         "updated_at": datetime.utcnow(),
     }
@@ -378,8 +378,8 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 description,
                 visibility,
                 labels,
-                file_name,
-                metadata_id,
+                original_name,
+                original_id,
                 created_at,
                 updated_at
             )
@@ -391,8 +391,8 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 :description,
                 :visibility,
                 :labels,
-                :file_name,
-                :metadata_id,
+                :original_name,
+                :original_id,
                 :created_at,
                 :updated_at
             )
@@ -404,8 +404,8 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 description = EXCLUDED.description,
                 visibility = EXCLUDED.visibility,
                 labels = EXCLUDED.labels,
-                file_name = EXCLUDED.file_name,
-                metadata_id = EXCLUDED.metadata_id,
+                original_name = EXCLUDED.original_name,
+                original_id = EXCLUDED.original_id,
                 updated_at = EXCLUDED.updated_at
             """
         ),

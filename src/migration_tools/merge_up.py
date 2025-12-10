@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 import uuid
@@ -461,7 +460,7 @@ def _migrate_users(
             {
                 "id": new_user_id,
                 "username": new_username,
-                "password": _generate_password_hash(),
+                "hashed_password": _generate_password_hash(),
                 "email": "",
                 "permissions": "{}",
                 "created_at": user.created_at,
@@ -492,11 +491,11 @@ def _upsert_leporid_users(
         conn.execute(
             text(
                 """
-                INSERT INTO tbl_user (id, username, password, email, permissions, created_at, updated_at)
-                VALUES (:id, :username, :password, :email, :permissions, :created_at, :updated_at)
+                INSERT INTO tbl_user (id, username, hashed_password, email, permissions, created_at, updated_at)
+                VALUES (:id, :username, :hashed_password, :email, :permissions, :created_at, :updated_at)
                 ON CONFLICT (id) DO UPDATE SET
                     username = EXCLUDED.username,
-                    password = EXCLUDED.password,
+                    hashed_password = EXCLUDED.hashed_password,
                     email = EXCLUDED.email,
                     permissions = EXCLUDED.permissions,
                     updated_at = EXCLUDED.updated_at
@@ -980,8 +979,8 @@ def _adapt_image_row_for_up(row, aspect_id: str, user_id: str, workshop: bool) -
         "description": "",
         "visibility": 0,
         "labels": labels,
-        "file_name": None,
-        "metadata_id": None,
+        "original_name": None,
+        "original_id": None,
         "created_at": uploaded_at,
         "updated_at": datetime.utcnow(),
     }
@@ -999,8 +998,8 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 description,
                 visibility,
                 labels,
-                file_name,
-                metadata_id,
+                original_name,
+                original_id,
                 created_at,
                 updated_at
             )
@@ -1012,8 +1011,8 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 :description,
                 :visibility,
                 :labels,
-                :file_name,
-                :metadata_id,
+                :original_name,
+                :original_id,
                 :created_at,
                 :updated_at
             )
@@ -1024,8 +1023,8 @@ def _upsert_images(conn: Connection, payload: Sequence[dict]) -> None:
                 description = EXCLUDED.description,
                 visibility = EXCLUDED.visibility,
                 labels = EXCLUDED.labels,
-                file_name = EXCLUDED.file_name,
-                metadata_id = EXCLUDED.metadata_id,
+                original_name = EXCLUDED.original_name,
+                original_id = EXCLUDED.original_id,
                 updated_at = EXCLUDED.updated_at
             """
         ),
