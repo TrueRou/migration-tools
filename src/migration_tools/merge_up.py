@@ -816,17 +816,17 @@ def _build_image_uuid_lookup(
         return {}
 
     image_id_by_file_name = {
-        row.file_name: str(row.id)
+        row.original_name: str(row.id)
         for row in leporid_conn.execute(
             text(
                 """
-                SELECT id, file_name
+                SELECT id, original_name
                 FROM tbl_image
-                WHERE file_name IS NOT NULL AND file_name <> ''
+                WHERE original_name IS NOT NULL AND original_name <> ''
                 """
             )
         )
-        if row.file_name
+        if row.original_name
     }
 
     mapping: Dict[str, str] = {}
