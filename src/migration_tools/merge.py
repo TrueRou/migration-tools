@@ -135,7 +135,7 @@ def _adapt_user_row(row: Row) -> dict:
     return {
         "id": uuid.uuid4(),
         "username": row.username,
-        "password": row.hashed_password,
+        "hashed_password": row.hashed_password,
         "email": row.email,
         "created_at": created_at,
         "updated_at": now,
