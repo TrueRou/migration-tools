@@ -25,16 +25,8 @@ MATERIAL_ID_WARS: str = "3b3f301c-d7c4-474e-a677-93c46eefb375"  # Wars 卡片使
 TYPE_ID_DX: str = "bbe19682-4c2d-4109-ac64-64c7f51e7b77"        # DX 卡片使用的 tbl_product_type.id（design_type=0）
 TYPE_ID_WARS: str = "bbe19682-4c2d-4109-ac64-64c7f51e7b77"      # Wars 卡片使用的 tbl_product_type.id（design_type=1）
 ADMIN_USER_ID: str = "07923542-ff85-442d-9fc9-247e0815e2e1"  # 用于关联工单的管理员用户 ID（tbl_user.id）
+BATCH_ID: str = "usagicard_migration"
 # ───────────────────────────────────────────────────────────────────────────
-
-# UsagiCard CardStatus（存储为字符串枚举）→ leporidae ArtifactStatus（整数）
-_CARD_STATUS_TO_ARTIFACT_STATUS: Dict[str, int] = {
-    "DRAFTED": 0,    # PENDING
-    "LOCKED": 1,     # IN_PRODUCTION
-    "DELIVERED": 2,  # COMPLETED
-    "ACTIVATED": 3,  # ACTIVATED
-}
-
 # UsagiCard CardPattern 整数值
 _PATTERN_DXPASS = 1
 _PATTERN_WARS = 2
@@ -307,12 +299,11 @@ def _migrate_products(
         payload.append(
             {
                 "id": product_id,
-                "name": "",
-                "description": "",
-                "price": "0.00",
+                "name": "定制NFC卡 - UsagiCard Founders",
+                "description": "以 ID-1 (85.5x54mm) NTAG215白卡 为基底制作的包含 舞萌 账号系统的标准尺寸兔卡（感谢您支持早期版本的兔卡，僕と契約して、魔法少女になってよ！）",
+                "price": "12.80",
                 "design": json.dumps(design, ensure_ascii=False),
-                "is_associated": card["id"] in associated_card_ids,
-                "is_modify_allowed": False,
+                "is_locked": True,
                 "user_id": ADMIN_USER_ID,
                 "material_id": material_id,
                 "type_id": type_id,
@@ -359,8 +350,7 @@ def _upsert_products(conn: Connection, payload: Sequence[dict]) -> None:
                 description       = EXCLUDED.description,
                 price             = EXCLUDED.price,
                 design            = EXCLUDED.design,
-                is_associated     = EXCLUDED.is_associated,
-                is_modify_allowed = EXCLUDED.is_modify_allowed,
+                is_locked         = EXCLUDED.is_locked,
                 user_id           = EXCLUDED.user_id,
                 material_id       = EXCLUDED.material_id,
                 type_id           = EXCLUDED.type_id,
@@ -403,8 +393,6 @@ def _migrate_artifacts(
             logger.debug("跳过工件（商品 %s 已有工件，不重复插入）", product_id)
             continue
 
-        artifact_status = _CARD_STATUS_TO_ARTIFACT_STATUS.get(str(card["status"]), 0)
-
         # 解析 derived_from：旧 card.uuid → 新 product UUID
         derived_from_old: str | None = card["properties"].get("derived_from")
         derived_from_new: str | None = None
@@ -425,9 +413,10 @@ def _migrate_artifacts(
         payload.append(
             {
                 "id": card["uuid"],
-                "status": artifact_status,
+                "status": 2,
                 "storage": json.dumps(storage, ensure_ascii=False),
-                "batch_id": None,
+                "batch_id": BATCH_ID,
+                "batch_no": card["id"],
                 "product_id": product_id,
                 "created_at": card["created_at"],
                 "updated_at": card["updated_at"],
