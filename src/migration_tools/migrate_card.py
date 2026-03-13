@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,7 +26,8 @@ MATERIAL_ID_WARS: str = "3b3f301c-d7c4-474e-a677-93c46eefb375"  # Wars 卡片使
 TYPE_ID_DX: str = "bbe19682-4c2d-4109-ac64-64c7f51e7b77"        # DX 卡片使用的 tbl_product_type.id（design_type=0）
 TYPE_ID_WARS: str = "bbe19682-4c2d-4109-ac64-64c7f51e7b77"      # Wars 卡片使用的 tbl_product_type.id（design_type=1）
 ADMIN_USER_ID: str = "07923542-ff85-442d-9fc9-247e0815e2e1"  # 用于关联工单的管理员用户 ID（tbl_user.id）
-BATCH_ID: str = "usagicard_migration"
+PERSONAL_USER_ID: str = "fa4e5196-fc0a-4a93-b0a2-3177d14b763a"  # 用于没有工单（个人单独创建）的数据的默认用户 ID
+BATCH_ID: str = "38e0a7b7-9f9b-41a9-a0bc-5e9c70d4c218"
 # ───────────────────────────────────────────────────────────────────────────
 # UsagiCard CardPattern 整数值
 _PATTERN_DXPASS = 1
@@ -53,6 +55,7 @@ class MigrateCardResult:
 
     products: MergeSectionResult
     artifacts: MergeSectionResult
+    orders: MergeSectionResult
 
 
 def run_migrate_card(config: MigrateCardConfig) -> MigrateCardResult:
@@ -146,7 +149,18 @@ def _execute_migrate_card(
         config=config,
     )
 
-    return MigrateCardResult(products=products_result, artifacts=artifacts_result)
+    orders_result = _migrate_orders(
+        source_cards=migrated_cards,
+        source_conn=source_conn,
+        target_conn=target_conn,
+        card_to_product_id=card_to_product_id,
+        domain_to_user=domain_to_user,
+        config=config,
+    )
+
+    return MigrateCardResult(
+        products=products_result, artifacts=artifacts_result, orders=orders_result
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +315,7 @@ def _migrate_products(
                 "id": product_id,
                 "name": "定制NFC卡 - UsagiCard Founders",
                 "description": "以 ID-1 (85.5x54mm) NTAG215白卡 为基底制作的包含 舞萌 账号系统的标准尺寸兔卡（感谢您支持早期版本的兔卡，僕と契約して、魔法少女になってよ！）",
-                "price": "12.80",
+                "price": "18.80",
                 "design": json.dumps(design, ensure_ascii=False),
                 "is_locked": True,
                 "user_id": ADMIN_USER_ID,
@@ -335,13 +349,13 @@ def _upsert_products(conn: Connection, payload: Sequence[dict]) -> None:
             """
             INSERT INTO tbl_product (
                 id, name, description, price, design,
-                is_associated, is_modify_allowed,
+                is_locked,
                 user_id, material_id, type_id,
                 created_at, updated_at
             )
             VALUES (
                 :id, :name, :description, :price, :design,
-                :is_associated, :is_modify_allowed,
+                :is_locked,
                 :user_id, :material_id, :type_id,
                 :created_at, :updated_at
             )
@@ -416,7 +430,7 @@ def _migrate_artifacts(
                 "status": 2,
                 "storage": json.dumps(storage, ensure_ascii=False),
                 "batch_id": BATCH_ID,
-                "batch_no": card["id"],
+                "batch_no": int(card["id"]),
                 "product_id": product_id,
                 "created_at": card["created_at"],
                 "updated_at": card["updated_at"],
@@ -450,6 +464,239 @@ def _insert_artifacts(conn: Connection, payload: Sequence[dict]) -> None:
         ),
         payload,
     )
+
+
+# ---------------------------------------------------------------------------
+# orders
+# ---------------------------------------------------------------------------
+
+def _migrate_orders(
+    *,
+    source_cards: Sequence[Dict[str, Any]],
+    source_conn: Connection,
+    target_conn: Connection,
+    card_to_product_id: Mapping[int, str],
+    domain_to_user: Mapping[int, str],
+    config: MigrateCardConfig,
+) -> MergeSectionResult:
+    summary = MergeSectionResult()
+
+    # load card_orders & orders
+    card_order_info = {}
+    rows = source_conn.execute(
+        text(
+            """
+            SELECT 
+                co.card_id, 
+                co.invite_code,
+                o.source_trade_id,
+                o.source_user_id,
+                o.address_person,
+                o.address_phone,
+                o.address_address,
+                o.tracking_number,
+                o.created_at
+            FROM card_orders co
+            LEFT JOIN orders o ON co.order_id = o.id
+            WHERE co.card_id IS NOT NULL
+            """
+        )
+    )
+    for row in rows:
+        card_order_info[row.card_id] = row
+
+    existing_order_items = {
+        str(row.product_id)
+        for row in target_conn.execute(text("SELECT product_id FROM tbl_order_item"))
+    }
+
+    orders_payload = []
+    items_payload = []
+    redemptions_payload = []
+
+    for card in source_cards:
+        summary.processed += 1
+        product_id = card_to_product_id[card["id"]]
+
+        # 避免重复
+        if product_id in existing_order_items:
+            summary.skipped += 1
+            continue
+
+        summary.inserted += 1
+        existing_order_items.add(product_id)
+
+        order_info = card_order_info.get(card["id"])
+
+        order_uuid = str(uuid.uuid4())
+        created_at = card["created_at"]
+
+        if order_info:
+            # 存在匹配的 card_order -> 判定为 Afdian / 管理员导入并发货
+            user_id = ADMIN_USER_ID
+            if order_info.created_at is not None:
+                created_at = _ensure_datetime(order_info.created_at)
+
+            shipping_name = order_info.address_person or ""
+            shipping_phone = order_info.address_phone or ""
+            shipping_address = order_info.address_address or ""
+            shipping_sn = order_info.tracking_number
+            shipped_at = created_at if shipping_sn else None
+            source_trade_id = order_info.source_trade_id
+            source_user_id = order_info.source_user_id
+            invite_code = order_info.invite_code
+
+            orders_payload.append(
+                {
+                    "id": order_uuid,
+                    "status": 1,  # PAID
+                    "product_money": "18.80",
+                    "shipping_money": "8",
+                    "payment_money": "26.80",
+                    "shipping_name": shipping_name,
+                    "shipping_phone": shipping_phone,
+                    "shipping_address": shipping_address,
+                    "shipping_sn": shipping_sn,
+                    "paid_at": created_at,
+                    "shipped_at": shipped_at,
+                    "closed_at": None,
+                    "user_id": user_id,
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                }
+            )
+
+            if source_trade_id:
+                platform_trade_id = source_trade_id if str(source_user_id) != "1" else f"admin_{uuid.uuid4().hex[:12]}"
+                platform_user_id = str(source_user_id) if str(source_user_id) != "1" else PERSONAL_USER_ID
+                platform = "afdian" if str(source_user_id) != "1" else "admin"
+                redemptions_payload.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "code": invite_code or secrets.token_urlsafe(8),
+                        "platform": platform,
+                        "platform_trade_id": platform_trade_id,
+                        "platform_user_id": platform_user_id,
+                        "claimed_at": created_at,
+                        "user_id": user_id,
+                        "order_id": order_uuid,
+                        "created_at": created_at,
+                        "updated_at": created_at,
+                    }
+                )
+        else:
+            # 不存在 card_order -> 判定为个人创建
+            user_id = PERSONAL_USER_ID
+
+            orders_payload.append(
+                {
+                    "id": order_uuid,
+                    "status": 1,  # PAID
+                    "product_money": "18.80",
+                    "shipping_money": "0",
+                    "payment_money": "18.80",
+                    "shipping_name": "",
+                    "shipping_phone": "",
+                    "shipping_address": "",
+                    "shipping_sn": None,
+                    "paid_at": created_at,
+                    "shipped_at": None,
+                    "closed_at": None,
+                    "user_id": user_id,
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                }
+            )
+
+        items_payload.append(
+            {
+                "id": str(uuid.uuid4()),
+                "quantity": 1,
+                "unit_price": "18.80",
+                "total_price": "18.80",
+                "order_id": order_uuid,
+                "product_id": product_id,
+                "created_at": created_at,
+                "updated_at": created_at,
+            }
+        )
+
+        if len(orders_payload) >= config.batch_size:
+            _insert_orders(
+                target_conn, orders_payload, items_payload, redemptions_payload
+            )
+            orders_payload.clear()
+            items_payload.clear()
+            redemptions_payload.clear()
+
+    if orders_payload:
+        _insert_orders(target_conn, orders_payload, items_payload, redemptions_payload)
+
+    logger.info(
+        "订单迁移完成：共处理 %d 条，新增 %d 条，更新 %d 条，跳过 %d 条",
+        summary.processed,
+        summary.inserted,
+        summary.updated,
+        summary.skipped,
+    )
+    return summary
+
+
+def _insert_orders(
+    conn: Connection,
+    orders: Sequence[dict],
+    items: Sequence[dict],
+    redemptions: Sequence[dict],
+) -> None:
+    if orders:
+        conn.execute(
+            text(
+                """
+                INSERT INTO tbl_order (
+                    id, status, product_money, shipping_money, payment_money,
+                    shipping_name, shipping_phone, shipping_address, shipping_sn,
+                    paid_at, shipped_at, closed_at, user_id, created_at, updated_at
+                ) VALUES (
+                    :id, :status, :product_money, :shipping_money, :payment_money,
+                    :shipping_name, :shipping_phone, :shipping_address, :shipping_sn,
+                    :paid_at, :shipped_at, :closed_at, :user_id, :created_at, :updated_at
+                )
+                """
+            ),
+            orders,
+        )
+
+    if items:
+        conn.execute(
+            text(
+                """
+                INSERT INTO tbl_order_item (
+                    id, quantity, unit_price, total_price, order_id, product_id,
+                    created_at, updated_at
+                ) VALUES (
+                    :id, :quantity, :unit_price, :total_price, :order_id, :product_id,
+                    :created_at, :updated_at
+                )
+                """
+            ),
+            items,
+        )
+
+    if redemptions:
+        conn.execute(
+            text(
+                """
+                INSERT INTO tbl_platform_redemption (
+                    id, code, platform, platform_trade_id, platform_user_id, claimed_at,
+                    user_id, order_id, created_at, updated_at
+                ) VALUES (
+                    :id, :code, :platform, :platform_trade_id, :platform_user_id, :claimed_at,
+                    :user_id, :order_id, :created_at, :updated_at
+                )
+                """
+            ),
+            redemptions,
+        )
 
 
 # ---------------------------------------------------------------------------
